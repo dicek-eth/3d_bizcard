@@ -118,6 +118,7 @@ const dbName = '3d-bizcard';
 const dbVersion = 1;
 const modelStoreName = 'settings';
 const activeModelKey = 'active-model';
+const autoRotationDurationMs = 10000;
 
 let mediaElement: MediaSourceElement | null = null;
 let cameraStream: MediaStream | null = null;
@@ -127,11 +128,7 @@ let smoothedTrack: TrackState | null = null;
 let lastDetectedAt = 0;
 let consecutiveMisses = 0;
 let userScale = 1;
-let userRotation = 0;
-let userTilt = 0;
 let displayedScale = userScale;
-let displayedRotation = userRotation;
-let displayedTilt = userTilt;
 let animationFrame = 0;
 let detectionFrame = 0;
 let lastRenderAt = 0;
@@ -478,19 +475,18 @@ function renderLoop(time = 0): void {
 }
 
 function placeCharacter(track: TrackState, time: number): void {
-  void time;
   const stageRect = feedLayer.getBoundingClientRect();
   const stageX = track.anchor.x - stageRect.width / 2;
   const stageY = stageRect.height / 2 - track.anchor.y;
   const baseScale = Math.max(48, track.size * 0.24) * displayedScale;
+  const autoRotation = getAutoRotation(time);
 
   root.position.set(stageX, stageY, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, 0);
-  characterPivot.rotation.set(displayedTilt, displayedRotation, 0);
+  characterPivot.rotation.set(0, autoRotation, 0);
   document.documentElement.dataset.characterScale = displayedScale.toFixed(4);
-  document.documentElement.dataset.characterRotation = displayedRotation.toFixed(4);
-  document.documentElement.dataset.characterTilt = displayedTilt.toFixed(4);
+  document.documentElement.dataset.characterRotation = autoRotation.toFixed(4);
 }
 
 function setupAdmin(): void {
@@ -676,18 +672,10 @@ function disposeObject(object: THREE.Object3D): void {
 
 function setupGestures(): void {
   const pointers = new Map<number, PointerEvent>();
-  const dragRotationSensitivity = 0.008;
-  const maxTilt = THREE.MathUtils.degToRad(55);
   let pinchStartDistance = 0;
-  let dragStartCenter: Point | null = null;
   let pinchStartScale = userScale;
-  let dragStartRotation = userRotation;
-  let dragStartTilt = userTilt;
   let touchStartDistance = 0;
-  let touchStartCenter: Point | null = null;
   let touchStartScale = userScale;
-  let touchStartRotation = userRotation;
-  let touchStartTilt = userTilt;
 
   sceneCanvas.addEventListener('pointerdown', (event) => {
     try {
@@ -700,10 +688,7 @@ function setupGestures(): void {
     if (pointers.size === 2) {
       const activePointers = [...pointers.values()];
       pinchStartDistance = pointerDistance(activePointers);
-      dragStartCenter = pointerCenter(activePointers);
       pinchStartScale = userScale;
-      dragStartRotation = userRotation;
-      dragStartTilt = userTilt;
     }
   });
 
@@ -717,13 +702,8 @@ function setupGestures(): void {
     if (pointers.size === 2 && pinchStartDistance > 0) {
       const activePointers = [...pointers.values()];
       const currentDistance = pointerDistance(activePointers);
-      const currentCenter = pointerCenter(activePointers);
-      const deltaX = dragStartCenter ? currentCenter.x - dragStartCenter.x : 0;
-      const deltaY = dragStartCenter ? currentCenter.y - dragStartCenter.y : 0;
       userScale = clamp(pinchStartScale * (currentDistance / pinchStartDistance), 0.5, 3);
-      userRotation = normalizeAngle(dragStartRotation + deltaX * dragRotationSensitivity);
-      userTilt = clamp(dragStartTilt + deltaY * dragRotationSensitivity, -maxTilt, maxTilt);
-      hintText.textContent = `Scale ${userScale.toFixed(2)}x / Rotate ${Math.round(THREE.MathUtils.radToDeg(userRotation))}deg`;
+      hintText.textContent = `Scale ${userScale.toFixed(2)}x / Auto rotate 10s`;
     }
   });
 
@@ -731,14 +711,10 @@ function setupGestures(): void {
     pointers.delete(event.pointerId);
     if (pointers.size < 2) {
       pinchStartDistance = 0;
-      dragStartCenter = null;
     } else {
       const activePointers = [...pointers.values()];
       pinchStartDistance = pointerDistance(activePointers);
-      dragStartCenter = pointerCenter(activePointers);
       pinchStartScale = userScale;
-      dragStartRotation = userRotation;
-      dragStartTilt = userTilt;
     }
   };
 
@@ -752,10 +728,7 @@ function setupGestures(): void {
         event.preventDefault();
         const touches = [...event.touches];
         touchStartDistance = touchDistance(touches);
-        touchStartCenter = touchCenter(touches);
         touchStartScale = userScale;
-        touchStartRotation = userRotation;
-        touchStartTilt = userTilt;
       }
     },
     { passive: false },
@@ -771,13 +744,8 @@ function setupGestures(): void {
       event.preventDefault();
       const touches = [...event.touches];
       const currentDistance = touchDistance(touches);
-      const currentCenter = touchCenter(touches);
-      const deltaX = touchStartCenter ? currentCenter.x - touchStartCenter.x : 0;
-      const deltaY = touchStartCenter ? currentCenter.y - touchStartCenter.y : 0;
       userScale = clamp(touchStartScale * (currentDistance / touchStartDistance), 0.5, 3);
-      userRotation = normalizeAngle(touchStartRotation + deltaX * dragRotationSensitivity);
-      userTilt = clamp(touchStartTilt + deltaY * dragRotationSensitivity, -maxTilt, maxTilt);
-      hintText.textContent = `Scale ${userScale.toFixed(2)}x / Rotate ${Math.round(THREE.MathUtils.radToDeg(userRotation))}deg`;
+      hintText.textContent = `Scale ${userScale.toFixed(2)}x / Auto rotate 10s`;
     },
     { passive: false },
   );
@@ -785,16 +753,12 @@ function setupGestures(): void {
   const releaseTouch = (event: TouchEvent) => {
     if (event.touches.length < 2) {
       touchStartDistance = 0;
-      touchStartCenter = null;
       return;
     }
 
     const touches = [...event.touches];
     touchStartDistance = touchDistance(touches);
-    touchStartCenter = touchCenter(touches);
     touchStartScale = userScale;
-    touchStartRotation = userRotation;
-    touchStartTilt = userTilt;
   };
 
   sceneCanvas.addEventListener('touchend', releaseTouch);
@@ -806,8 +770,11 @@ function updateDisplayedGesture(time: number): void {
   lastRenderAt = time;
 
   displayedScale = damp(displayedScale, userScale, 26, deltaMs);
-  displayedRotation = dampAngle(displayedRotation, userRotation, 30, deltaMs);
-  displayedTilt = damp(displayedTilt, userTilt, 30, deltaMs);
+}
+
+function getAutoRotation(time: number): number {
+  const progress = (time % autoRotationDurationMs) / autoRotationDurationMs;
+  return normalizeAngle(-progress * Math.PI * 2);
 }
 
 function getSourceSize(element: MediaSourceElement): { width: number; height: number } {
@@ -904,34 +871,12 @@ function pointerDistance(events: PointerEvent[]): number {
   return distance(events[0], events[1]);
 }
 
-function pointerCenter(events: PointerEvent[]): Point {
-  if (events.length < 2) {
-    return { x: 0, y: 0 };
-  }
-
-  return {
-    x: (events[0].clientX + events[1].clientX) / 2,
-    y: (events[0].clientY + events[1].clientY) / 2,
-  };
-}
-
 function touchDistance(touches: Touch[]): number {
   if (touches.length < 2) {
     return 0;
   }
 
   return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
-}
-
-function touchCenter(touches: Touch[]): Point {
-  if (touches.length < 2) {
-    return { x: 0, y: 0 };
-  }
-
-  return {
-    x: (touches[0].clientX + touches[1].clientX) / 2,
-    y: (touches[0].clientY + touches[1].clientY) / 2,
-  };
 }
 
 function normalizeAngle(value: number): number {
@@ -950,11 +895,6 @@ function lerpAngle(a: number, b: number, factor: number): number {
 function damp(current: number, target: number, lambda: number, deltaMs: number): number {
   const factor = 1 - Math.exp(-lambda * (deltaMs / 1000));
   return lerp(current, target, factor);
-}
-
-function dampAngle(current: number, target: number, lambda: number, deltaMs: number): number {
-  const factor = 1 - Math.exp(-lambda * (deltaMs / 1000));
-  return normalizeAngle(lerpAngle(current, target, factor));
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -85,6 +85,15 @@ for (const viewport of [
   }
 
   if (viewport.name === 'desktop') {
+    const rotationBeforeAuto = Number(await page.evaluate(() => document.documentElement.dataset.characterRotation ?? '0'));
+    await page.waitForTimeout(650);
+    const rotationAfterAuto = Number(await page.evaluate(() => document.documentElement.dataset.characterRotation ?? '0'));
+    const autoRotationDelta = Math.abs(shortestAngleDelta(rotationAfterAuto, rotationBeforeAuto));
+
+    if (autoRotationDelta < 0.25) {
+      throw new Error(`Expected automatic character rotation, got delta ${autoRotationDelta}`);
+    }
+
     await page.evaluate(() => {
       const canvas = document.querySelector('#sceneCanvas');
       if (!(canvas instanceof HTMLCanvasElement)) {
@@ -105,15 +114,16 @@ for (const viewport of [
 
       dispatch('pointerdown', 1, 540, 420);
       dispatch('pointerdown', 2, 740, 420);
-      dispatch('pointermove', 1, 620, 390);
-      dispatch('pointermove', 2, 820, 390);
-      dispatch('pointerup', 1, 620, 390);
-      dispatch('pointerup', 2, 820, 390);
+      dispatch('pointermove', 1, 500, 420);
+      dispatch('pointermove', 2, 780, 420);
+      dispatch('pointerup', 1, 500, 420);
+      dispatch('pointerup', 2, 780, 420);
     });
-    await page.waitForFunction(() => Math.abs(Number(document.documentElement.dataset.characterRotation ?? '0')) > 0.2, null, {
+    await page.waitForFunction(() => Number(document.documentElement.dataset.characterScale ?? '1') > 1.1, null, {
       timeout: 5000,
     });
-    result.rotationAfterGesture = await page.evaluate(() => document.documentElement.dataset.characterRotation ?? '0');
+    result.autoRotationDelta = autoRotationDelta.toFixed(4);
+    result.scaleAfterPinch = await page.evaluate(() => document.documentElement.dataset.characterScale ?? '1');
 
     await page.evaluate(() => {
       const image = document.querySelector('.camera-feed');
@@ -183,6 +193,10 @@ await adminPage.close();
 await browser.close();
 await fs.writeFile(path.join(outputDir, 'demo-results.json'), `${JSON.stringify(results, null, 2)}\n`);
 console.log(JSON.stringify(results, null, 2));
+
+function shortestAngleDelta(current, start) {
+  return Math.atan2(Math.sin(current - start), Math.cos(current - start));
+}
 
 async function exists(filePath) {
   try {
