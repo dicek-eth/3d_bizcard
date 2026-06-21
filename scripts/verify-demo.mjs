@@ -75,11 +75,37 @@ for (const viewport of [
 
   const screenshotPath = path.join(outputDir, `demo-${viewport.name}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
-  results.push({ viewport: viewport.name, screenshot: path.relative(root, screenshotPath), ...metrics });
+  const result = { viewport: viewport.name, screenshot: path.relative(root, screenshotPath), ...metrics };
 
   if (metrics.nonTransparent < 1000 || metrics.bright < 500) {
     throw new Error(`${viewport.name} canvas did not contain enough rendered pixels: ${JSON.stringify(metrics)}`);
   }
+
+  if (viewport.name === 'desktop') {
+    await page.evaluate(() => {
+      const image = document.querySelector('.camera-feed');
+      if (image instanceof HTMLImageElement) {
+        image.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221050%22 height=%22638%22%3E%3Crect width=%221050%22 height=%22638%22 fill=%22white%22/%3E%3C/svg%3E';
+      }
+    });
+    await page.waitForTimeout(650);
+
+    const heldStatus = await page.evaluate(() => document.querySelector('#statusText')?.textContent);
+    if (heldStatus !== 'QR locked') {
+      throw new Error(`Expected QR lock to be held through a short detection miss, got ${heldStatus}`);
+    }
+
+    await page.waitForTimeout(1400);
+    const lostStatus = await page.evaluate(() => document.querySelector('#statusText')?.textContent);
+    if (lostStatus !== 'Searching for QR') {
+      throw new Error(`Expected QR lock to release after the hold window, got ${lostStatus}`);
+    }
+
+    result.holdStatus = heldStatus;
+    result.lostStatus = lostStatus;
+  }
+
+  results.push(result);
   await page.close();
 }
 

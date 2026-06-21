@@ -63,12 +63,15 @@ const params = new URLSearchParams(window.location.search);
 const demoMode = params.get('demo') === '1';
 const verifyMode = params.get('verify') === '1';
 const expectedCardId = params.get('card') ?? 'default';
+const trackHoldMs = 900;
 
 let mediaElement: MediaSourceElement | null = null;
 let cameraStream: MediaStream | null = null;
 let running = false;
 let latestTrack: TrackState | null = null;
 let smoothedTrack: TrackState | null = null;
+let lastDetectedAt = 0;
+let consecutiveMisses = 0;
 let userScale = 1;
 let animationFrame = 0;
 let detectionFrame = 0;
@@ -237,6 +240,8 @@ async function startExperience(): Promise<void> {
     stage.classList.add('is-running');
     latestTrack = null;
     smoothedTrack = null;
+    lastDetectedAt = 0;
+    consecutiveMisses = 0;
     detectionLoop();
     renderLoop();
   } catch (error) {
@@ -319,8 +324,24 @@ function detectionLoop(): void {
       inversionAttempts: 'attemptBoth',
     });
 
-    latestTrack = code ? toTrackState(code, sourceSize, scale) : null;
-    updateStatusFromTrack(latestTrack);
+    if (code) {
+      latestTrack = toTrackState(code, sourceSize, scale);
+      lastDetectedAt = performance.now();
+      consecutiveMisses = 0;
+      updateStatusFromTrack(latestTrack);
+    } else {
+      consecutiveMisses += 1;
+      const elapsedSinceDetection = performance.now() - lastDetectedAt;
+      const shouldHoldTrack = latestTrack && (elapsedSinceDetection <= trackHoldMs || consecutiveMisses <= 3);
+
+      if (shouldHoldTrack) {
+        updateStatusFromTrack(latestTrack);
+      } else {
+        latestTrack = null;
+        smoothedTrack = null;
+        updateStatusFromTrack(null);
+      }
+    }
   }
 
   detectionFrame = window.setTimeout(detectionLoop, demoMode ? 400 : 90);
@@ -391,17 +412,17 @@ function placeCharacter(track: TrackState, time: number): void {
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, -track.rotation);
 
-  const hover = Math.sin(time * 0.004) * 8;
+  const hover = Math.sin(time * 0.002) * 2;
   character.position.y = hover;
-  character.rotation.y = Math.sin(time * 0.0015) * 0.22;
+  character.rotation.y = Math.sin(time * 0.0015) * 0.12;
 
   const ring = character.userData.ring as THREE.Mesh;
   ring.rotation.z = time * 0.002;
 
   const leftArm = character.userData.leftArm as THREE.Mesh;
   const rightArm = character.userData.rightArm as THREE.Mesh;
-  leftArm.rotation.z = -0.55 + Math.sin(time * 0.004) * 0.12;
-  rightArm.rotation.z = 0.55 - Math.sin(time * 0.004) * 0.12;
+  leftArm.rotation.z = -0.55 + Math.sin(time * 0.003) * 0.06;
+  rightArm.rotation.z = 0.55 - Math.sin(time * 0.003) * 0.06;
 }
 
 function setupGestures(): void {
