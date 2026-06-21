@@ -5,3 +5,4 @@ verification/
 *.local
 .env
 .env.*
+.vercel

@@ -2,6 +2,12 @@
 
 Web AR prototype for a business card back. Scanning the QR opens the web app; pointing the app camera at the same QR shows a Three.js character that follows the QR position.
 
+Production URL:
+
+```text
+https://3dbizcard.vercel.app
+```
+
 ## Features
 
 - QR-code launch flow
