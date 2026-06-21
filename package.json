@@ -1,0 +1,29 @@
+{
+  "name": "3d_bizcard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "generate:card": "node scripts/generate-test-card.mjs",
+    "verify:demo": "node scripts/verify-demo.mjs",
+    "check": "npm run generate:card && npm run build"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4",
+    "three": "^0.181.2"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "@types/three": "^0.181.0",
+    "playwright": "^1.57.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7"
+  }
+}
