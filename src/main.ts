@@ -129,8 +129,12 @@ let consecutiveMisses = 0;
 let userScale = 1;
 let userRotation = 0;
 let userTilt = 0;
+let displayedScale = userScale;
+let displayedRotation = userRotation;
+let displayedTilt = userTilt;
 let animationFrame = 0;
 let detectionFrame = 0;
+let lastRenderAt = 0;
 
 const detectorCanvas = document.createElement('canvas');
 const detectorContext = createDetectorContext(detectorCanvas);
@@ -139,10 +143,12 @@ const renderer = new THREE.WebGLRenderer({
   canvas: sceneCanvas,
   alpha: true,
   antialias: true,
+  premultipliedAlpha: false,
   preserveDrawingBuffer: verifyMode,
 });
 renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
@@ -267,6 +273,7 @@ function createDefaultCharacter(): THREE.Group {
   group.add(ring);
 
   group.userData = { ring, leftArm, rightArm };
+  prepareCharacterForAr(group);
   return group;
 }
 
@@ -445,6 +452,7 @@ function toTrackState(code: QRCode, sourceSize: { width: number; height: number 
 
 function renderLoop(time = 0): void {
   resizeScene();
+  updateDisplayedGesture(time);
 
   if (latestTrack) {
     smoothedTrack = smoothedTrack ? smoothTrack(smoothedTrack, latestTrack) : latestTrack;
@@ -474,14 +482,15 @@ function placeCharacter(track: TrackState, time: number): void {
   const stageRect = feedLayer.getBoundingClientRect();
   const stageX = track.anchor.x - stageRect.width / 2;
   const stageY = stageRect.height / 2 - track.anchor.y;
-  const baseScale = Math.max(48, track.size * 0.24) * userScale;
+  const baseScale = Math.max(48, track.size * 0.24) * displayedScale;
 
   root.position.set(stageX, stageY, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, 0);
-  characterPivot.rotation.set(userTilt, userRotation, 0);
-  document.documentElement.dataset.characterRotation = userRotation.toFixed(4);
-  document.documentElement.dataset.characterTilt = userTilt.toFixed(4);
+  characterPivot.rotation.set(displayedTilt, displayedRotation, 0);
+  document.documentElement.dataset.characterScale = displayedScale.toFixed(4);
+  document.documentElement.dataset.characterRotation = displayedRotation.toFixed(4);
+  document.documentElement.dataset.characterTilt = displayedTilt.toFixed(4);
 }
 
 function setupAdmin(): void {
@@ -599,6 +608,40 @@ function normalizeModel(model: THREE.Group): void {
   model.position.sub(center);
   model.scale.setScalar(1.75 / largestAxis);
   model.rotation.x = -0.35;
+  prepareCharacterForAr(model);
+}
+
+function prepareCharacterForAr(object: THREE.Object3D): void {
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+
+    if (!mesh.isMesh) {
+      return;
+    }
+
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 10;
+
+    if (mesh.geometry && !mesh.geometry.attributes.normal) {
+      mesh.geometry.computeVertexNormals();
+    }
+
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const material of materials) {
+      if (!material) {
+        continue;
+      }
+
+      material.transparent = false;
+      material.opacity = 1;
+      material.depthTest = true;
+      material.depthWrite = true;
+      material.side = THREE.DoubleSide;
+      material.blending = THREE.NormalBlending;
+      material.colorWrite = true;
+      material.needsUpdate = true;
+    }
+  });
 }
 
 function replaceCharacter(nextCharacter: THREE.Group): void {
@@ -633,7 +676,7 @@ function disposeObject(object: THREE.Object3D): void {
 
 function setupGestures(): void {
   const pointers = new Map<number, PointerEvent>();
-  const dragRotationSensitivity = 0.01;
+  const dragRotationSensitivity = 0.008;
   const maxTilt = THREE.MathUtils.degToRad(55);
   let pinchStartDistance = 0;
   let dragStartCenter: Point | null = null;
@@ -756,6 +799,15 @@ function setupGestures(): void {
 
   sceneCanvas.addEventListener('touchend', releaseTouch);
   sceneCanvas.addEventListener('touchcancel', releaseTouch);
+}
+
+function updateDisplayedGesture(time: number): void {
+  const deltaMs = lastRenderAt > 0 ? Math.min(48, time - lastRenderAt) : 16.7;
+  lastRenderAt = time;
+
+  displayedScale = damp(displayedScale, userScale, 26, deltaMs);
+  displayedRotation = dampAngle(displayedRotation, userRotation, 30, deltaMs);
+  displayedTilt = damp(displayedTilt, userTilt, 30, deltaMs);
 }
 
 function getSourceSize(element: MediaSourceElement): { width: number; height: number } {
@@ -893,6 +945,16 @@ function lerp(a: number, b: number, factor: number): number {
 function lerpAngle(a: number, b: number, factor: number): number {
   const diff = Math.atan2(Math.sin(b - a), Math.cos(b - a));
   return a + diff * factor;
+}
+
+function damp(current: number, target: number, lambda: number, deltaMs: number): number {
+  const factor = 1 - Math.exp(-lambda * (deltaMs / 1000));
+  return lerp(current, target, factor);
+}
+
+function dampAngle(current: number, target: number, lambda: number, deltaMs: number): number {
+  const factor = 1 - Math.exp(-lambda * (deltaMs / 1000));
+  return normalizeAngle(lerpAngle(current, target, factor));
 }
 
 function clamp(value: number, min: number, max: number): number {
