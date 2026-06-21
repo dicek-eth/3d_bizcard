@@ -7,8 +7,10 @@ const root = process.cwd();
 const outputDir = path.join(root, 'verification');
 const baseUrl = process.env.BASE_URL ?? 'http://127.0.0.1:5173/?demo=1&verify=1&card=default';
 const chromePath = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const sampleModelPath = path.join(outputDir, 'sample-character.gltf');
 
 await fs.mkdir(outputDir, { recursive: true });
+await fs.writeFile(sampleModelPath, createSampleGltf(), 'utf8');
 
 const launchOptions = { headless: true };
 
@@ -18,6 +20,7 @@ if (await exists(chromePath)) {
 
 const browser = await chromium.launch(launchOptions);
 const results = [];
+const baseOrigin = new URL(baseUrl).origin;
 
 for (const viewport of [
   { name: 'desktop', width: 1280, height: 820 },
@@ -109,6 +112,44 @@ for (const viewport of [
   await page.close();
 }
 
+const adminPage = await browser.newPage({ viewport: { width: 1024, height: 760 } });
+await adminPage.goto(`${baseOrigin}/admin`, { waitUntil: 'networkidle' });
+await adminPage.waitForSelector('text=キャラクター管理', { timeout: 10000 });
+const adminStatus = await adminPage.locator('#modelStatus').textContent();
+await adminPage.locator('#modelInput').setInputFiles(sampleModelPath);
+await adminPage.waitForFunction(() => document.querySelector('#modelStatus')?.textContent === '現在のモデル: sample-character.gltf', null, {
+  timeout: 10000,
+});
+const uploadedStatus = await adminPage.locator('#modelStatus').textContent();
+await adminPage.goto(`${baseOrigin}/?demo=1&verify=1&card=default`, { waitUntil: 'networkidle' });
+await adminPage.waitForFunction(() => document.documentElement.dataset.activeModel === 'sample-character.gltf', null, {
+  timeout: 10000,
+});
+const arModelName = await adminPage.evaluate(() => document.documentElement.dataset.activeModel ?? '');
+await adminPage.getByRole('button', { name: /^Start (AR|Demo)$/i }).click();
+await adminPage.waitForFunction(
+  () => document.querySelector('#statusText')?.textContent === 'QR locked',
+  null,
+  { timeout: 15000 },
+);
+await adminPage.goto(`${baseOrigin}/admin`, { waitUntil: 'networkidle' });
+await adminPage.getByRole('button', { name: 'デフォルトに戻す' }).click();
+await adminPage.waitForFunction(() => document.querySelector('#modelStatus')?.textContent === '現在のモデル: デフォルト', null, {
+  timeout: 10000,
+});
+const resetStatus = await adminPage.locator('#modelStatus').textContent();
+const adminScreenshotPath = path.join(outputDir, 'admin.png');
+await adminPage.screenshot({ path: adminScreenshotPath, fullPage: true });
+results.push({
+  viewport: 'admin',
+  screenshot: path.relative(root, adminScreenshotPath),
+  status: adminStatus?.trim() ?? '',
+  uploadedStatus: uploadedStatus?.trim() ?? '',
+  arModelName,
+  resetStatus: resetStatus?.trim() ?? '',
+});
+await adminPage.close();
+
 await browser.close();
 await fs.writeFile(path.join(outputDir, 'demo-results.json'), `${JSON.stringify(results, null, 2)}\n`);
 console.log(JSON.stringify(results, null, 2));
@@ -120,4 +161,59 @@ async function exists(filePath) {
   } catch {
     return false;
   }
+}
+
+function createSampleGltf() {
+  const floats = new Float32Array([
+    0, 0.75, 0,
+    -0.55, -0.45, 0,
+    0.55, -0.45, 0,
+  ]);
+  const indices = new Uint16Array([0, 1, 2]);
+  const padding = new Uint8Array(2);
+  const binary = Buffer.concat([
+    Buffer.from(floats.buffer),
+    Buffer.from(indices.buffer),
+    Buffer.from(padding.buffer),
+  ]);
+
+  return JSON.stringify({
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0 }],
+    meshes: [
+      {
+        primitives: [
+          {
+            attributes: { POSITION: 0 },
+            indices: 1,
+            material: 0,
+          },
+        ],
+      },
+    ],
+    materials: [{ pbrMetallicRoughness: { baseColorFactor: [0.12, 0.54, 0.44, 1], roughnessFactor: 0.5 } }],
+    buffers: [{ uri: `data:application/octet-stream;base64,${binary.toString('base64')}`, byteLength: binary.byteLength }],
+    bufferViews: [
+      { buffer: 0, byteOffset: 0, byteLength: floats.byteLength, target: 34962 },
+      { buffer: 0, byteOffset: floats.byteLength, byteLength: indices.byteLength, target: 34963 },
+    ],
+    accessors: [
+      {
+        bufferView: 0,
+        componentType: 5126,
+        count: 3,
+        type: 'VEC3',
+        min: [-0.55, -0.45, 0],
+        max: [0.55, 0.75, 0],
+      },
+      {
+        bufferView: 1,
+        componentType: 5123,
+        count: 3,
+        type: 'SCALAR',
+      },
+    ],
+  });
 }

@@ -1,5 +1,6 @@
 import jsQR, { type QRCode } from 'jsqr';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import './styles.css';
 
 type Point = {
@@ -16,14 +17,23 @@ type TrackState = {
 
 type MediaSourceElement = HTMLVideoElement | HTMLImageElement;
 
+type StoredModel = {
+  file: Blob;
+  name: string;
+  updatedAt: number;
+};
+
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
   throw new Error('App root was not found.');
 }
 
+const params = new URLSearchParams(window.location.search);
+const adminMode = window.location.pathname === '/admin' || params.get('admin') === '1';
+
 app.innerHTML = `
-  <main class="ar-shell">
+  <main class="ar-shell ${adminMode ? 'is-hidden' : ''}">
     <section class="stage" aria-label="AR camera stage">
       <div class="feed-layer" id="feedLayer"></div>
       <canvas class="scene-canvas" id="sceneCanvas" aria-hidden="true"></canvas>
@@ -48,6 +58,43 @@ app.innerHTML = `
       </div>
     </section>
   </main>
+  <main class="admin-shell ${adminMode ? '' : 'is-hidden'}">
+    <section class="admin-layout">
+      <header class="admin-header">
+        <div>
+          <p class="eyebrow">3D Bizcard</p>
+          <h1>キャラクター管理</h1>
+        </div>
+        <a class="text-button" href="/?card=default">ARを開く</a>
+      </header>
+
+      <section class="admin-panel">
+        <h2>表示キャラクター</h2>
+        <p id="modelStatus" class="admin-status">現在のモデルを確認しています...</p>
+        <label class="file-picker">
+          <span>3Dファイルを選択</span>
+          <input id="modelInput" type="file" accept=".glb,.gltf,.blend,model/gltf-binary,model/gltf+json" />
+        </label>
+        <div class="admin-actions">
+          <button class="primary-button admin-button" id="resetModelButton" type="button">デフォルトに戻す</button>
+          <a class="text-button" href="/?demo=1&card=default">デモで確認</a>
+        </div>
+      </section>
+
+      <section class="admin-panel">
+        <h2>Blenderからの書き出し</h2>
+        <p>
+          BlenderのglTF 2.0 exporterでGLB形式を書き出してください。.blendは編集用プロジェクトファイルなので、ブラウザのWebGLでは直接読み込めません。
+        </p>
+        <ul>
+          <li>Format: GLB Binary</li>
+          <li>テクスチャはGLB内に含める</li>
+          <li>推奨サイズは5MB以下</li>
+          <li>キャラクターは直立、原点付近に配置</li>
+        </ul>
+      </section>
+    </section>
+  </main>
 `;
 
 const feedLayer = document.querySelector<HTMLDivElement>('#feedLayer')!;
@@ -58,12 +105,18 @@ const restartButton = document.querySelector<HTMLButtonElement>('#restartButton'
 const statusText = document.querySelector<HTMLParagraphElement>('#statusText')!;
 const hintText = document.querySelector<HTMLParagraphElement>('#hintText')!;
 const reticle = document.querySelector<HTMLDivElement>('#reticle')!;
+const modelInput = document.querySelector<HTMLInputElement>('#modelInput')!;
+const modelStatus = document.querySelector<HTMLParagraphElement>('#modelStatus')!;
+const resetModelButton = document.querySelector<HTMLButtonElement>('#resetModelButton')!;
 
-const params = new URLSearchParams(window.location.search);
 const demoMode = params.get('demo') === '1';
 const verifyMode = params.get('verify') === '1';
 const expectedCardId = params.get('card') ?? 'default';
 const trackHoldMs = 900;
+const dbName = '3d-bizcard';
+const dbVersion = 1;
+const modelStoreName = 'settings';
+const activeModelKey = 'active-model';
 
 let mediaElement: MediaSourceElement | null = null;
 let cameraStream: MediaStream | null = null;
@@ -96,7 +149,8 @@ const root = new THREE.Group();
 root.visible = false;
 scene.add(root);
 
-const character = createCharacter();
+let character = createDefaultCharacter();
+setActiveModelName('default');
 root.add(character);
 
 const ambient = new THREE.AmbientLight(0xffffff, 1.7);
@@ -111,7 +165,9 @@ rimLight.position.set(-2, 1, 2);
 scene.add(rimLight);
 
 setupGestures();
+setupAdmin();
 resizeScene();
+void loadStoredCharacter();
 window.addEventListener('resize', resizeScene);
 
 startButton.addEventListener('click', () => {
@@ -127,7 +183,7 @@ if (demoMode) {
   hintText.textContent = 'Demo mode uses the generated card image as the camera target.';
 }
 
-function createCharacter(): THREE.Group {
+function createDefaultCharacter(): THREE.Group {
   const group = new THREE.Group();
   group.rotation.x = -0.35;
 
@@ -402,6 +458,7 @@ function renderLoop(time = 0): void {
 }
 
 function placeCharacter(track: TrackState, time: number): void {
+  void time;
   const stageRect = feedLayer.getBoundingClientRect();
   const stageX = track.center.x - stageRect.width / 2;
   const stageY = stageRect.height / 2 - track.center.y;
@@ -411,18 +468,153 @@ function placeCharacter(track: TrackState, time: number): void {
   root.position.set(stageX, stageY + lift, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, -track.rotation);
+}
 
-  const hover = Math.sin(time * 0.002) * 2;
-  character.position.y = hover;
-  character.rotation.y = Math.sin(time * 0.0015) * 0.12;
+function setupAdmin(): void {
+  refreshModelStatus();
 
-  const ring = character.userData.ring as THREE.Mesh;
-  ring.rotation.z = time * 0.002;
+  modelInput.addEventListener('change', () => {
+    const file = modelInput.files?.[0];
+    if (!file) {
+      return;
+    }
 
-  const leftArm = character.userData.leftArm as THREE.Mesh;
-  const rightArm = character.userData.rightArm as THREE.Mesh;
-  leftArm.rotation.z = -0.55 + Math.sin(time * 0.003) * 0.06;
-  rightArm.rotation.z = 0.55 - Math.sin(time * 0.003) * 0.06;
+    void saveSelectedModel(file);
+  });
+
+  resetModelButton.addEventListener('click', () => {
+    void resetStoredModel();
+  });
+}
+
+async function saveSelectedModel(file: File): Promise<void> {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+
+  if (extension === 'blend') {
+    modelStatus.textContent = '.blendは直接読み込めません。BlenderからGLB形式で書き出して、.glbファイルをアップロードしてください。';
+    modelInput.value = '';
+    return;
+  }
+
+  if (extension !== 'glb' && extension !== 'gltf') {
+    modelStatus.textContent = '未対応のファイルです。.glb または自己完結した .gltf をアップロードしてください。';
+    modelInput.value = '';
+    return;
+  }
+
+  try {
+    modelStatus.textContent = `${file.name} を読み込んでいます...`;
+    const model = await parseModelBlob(file);
+    await writeStoredModel({
+      file,
+      name: file.name,
+      updatedAt: Date.now(),
+    });
+    replaceCharacter(model);
+    setActiveModelName(file.name);
+    modelStatus.textContent = `現在のモデル: ${file.name}`;
+    modelInput.value = '';
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Model could not be loaded.';
+    modelStatus.textContent = `このモデルは使用できません: ${message}`;
+    modelInput.value = '';
+  }
+}
+
+async function resetStoredModel(): Promise<void> {
+  await deleteStoredModel();
+  replaceCharacter(createDefaultCharacter());
+  setActiveModelName('default');
+  modelStatus.textContent = '現在のモデル: デフォルト';
+}
+
+async function loadStoredCharacter(): Promise<void> {
+  const storedModel = await readStoredModel();
+
+  if (!storedModel) {
+    modelStatus.textContent = '現在のモデル: デフォルト';
+    return;
+  }
+
+  try {
+    const model = await parseModelBlob(storedModel.file);
+    replaceCharacter(model);
+    setActiveModelName(storedModel.name);
+    modelStatus.textContent = `現在のモデル: ${storedModel.name}`;
+  } catch {
+    setActiveModelName('default');
+    modelStatus.textContent = '保存済みモデルを読み込めませんでした。デフォルトを使用します。';
+  }
+}
+
+function refreshModelStatus(): void {
+  void readStoredModel().then((storedModel) => {
+    modelStatus.textContent = storedModel ? `現在のモデル: ${storedModel.name}` : '現在のモデル: デフォルト';
+  });
+}
+
+async function parseModelBlob(blob: Blob): Promise<THREE.Group> {
+  const buffer = await blob.arrayBuffer();
+  const loader = new GLTFLoader();
+
+  return new Promise((resolve, reject) => {
+    loader.parse(
+      buffer,
+      '',
+      (gltf) => {
+        const model = new THREE.Group();
+        model.add(gltf.scene);
+        normalizeModel(model);
+        resolve(model);
+      },
+      (error) => reject(error instanceof Error ? error : new Error('GLTF parsing failed.')),
+    );
+  });
+}
+
+function normalizeModel(model: THREE.Group): void {
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const largestAxis = Math.max(size.x, size.y, size.z);
+
+  if (!Number.isFinite(largestAxis) || largestAxis <= 0) {
+    throw new Error('The model has no measurable geometry.');
+  }
+
+  model.position.sub(center);
+  model.scale.setScalar(1.75 / largestAxis);
+  model.rotation.x = -0.35;
+}
+
+function replaceCharacter(nextCharacter: THREE.Group): void {
+  root.remove(character);
+  disposeObject(character);
+  character = nextCharacter;
+  root.add(character);
+}
+
+function setActiveModelName(name: string): void {
+  document.documentElement.dataset.activeModel = name;
+}
+
+function disposeObject(object: THREE.Object3D): void {
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+
+    if (mesh.geometry) {
+      mesh.geometry.dispose();
+    }
+
+    const material = mesh.material;
+    if (Array.isArray(material)) {
+      for (const item of material) {
+        item.dispose();
+      }
+    } else if (material) {
+      material.dispose();
+    }
+  });
 }
 
 function setupGestures(): void {
@@ -578,6 +770,79 @@ function safelyParseUrl(value: string): URL | null {
 
 function setStatus(value: string): void {
   statusText.textContent = value;
+}
+
+async function readStoredModel(): Promise<StoredModel | null> {
+  const db = await openModelDb();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(modelStoreName, 'readonly');
+    const store = transaction.objectStore(modelStoreName);
+    const request = store.get(activeModelKey);
+
+    request.addEventListener('success', () => {
+      resolve((request.result as StoredModel | undefined) ?? null);
+      db.close();
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Stored model could not be read.'));
+      db.close();
+    });
+  });
+}
+
+async function writeStoredModel(model: StoredModel): Promise<void> {
+  const db = await openModelDb();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(modelStoreName, 'readwrite');
+    const store = transaction.objectStore(modelStoreName);
+    const request = store.put(model, activeModelKey);
+
+    request.addEventListener('success', () => {
+      resolve();
+      db.close();
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Model could not be saved.'));
+      db.close();
+    });
+  });
+}
+
+async function deleteStoredModel(): Promise<void> {
+  const db = await openModelDb();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(modelStoreName, 'readwrite');
+    const store = transaction.objectStore(modelStoreName);
+    const request = store.delete(activeModelKey);
+
+    request.addEventListener('success', () => {
+      resolve();
+      db.close();
+    });
+    request.addEventListener('error', () => {
+      reject(request.error ?? new Error('Stored model could not be deleted.'));
+      db.close();
+    });
+  });
+}
+
+function openModelDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, dbVersion);
+
+    request.addEventListener('upgradeneeded', () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(modelStoreName)) {
+        db.createObjectStore(modelStoreName);
+      }
+    });
+
+    request.addEventListener('success', () => resolve(request.result));
+    request.addEventListener('error', () => reject(request.error ?? new Error('Model database could not be opened.')));
+  });
 }
 
 function clearFeed(): void {

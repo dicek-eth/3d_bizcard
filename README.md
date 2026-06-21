@@ -15,6 +15,8 @@ https://3dbizcard.vercel.app
 - QR tracking with corner-based overlay placement
 - Three.js character rendered over the camera feed
 - Pinch zoom from 0.5x to 3.0x
+- Character admin screen at `/admin`
+- Custom `.glb` or self-contained `.gltf` model storage in the browser
 - Demo mode using a generated business card back image
 
 ## Setup
@@ -41,6 +43,24 @@ To run automated demo verification while the dev server is running:
 ```bash
 npm run verify:demo
 ```
+
+## Character Admin
+
+Open:
+
+```text
+https://3dbizcard.vercel.app/admin
+```
+
+Upload a `.glb` file to replace the AR character on that device/browser. The selected model is saved in IndexedDB and loaded by the AR screen on the same origin.
+
+Blender source files (`.blend`) are not directly renderable in browser WebGL. Export from Blender with:
+
+```text
+File > Export > glTF 2.0 > Format: GLB Binary
+```
+
+Pack textures into the GLB and keep the file under 5MB when possible.
 
 ## Test Card
 
