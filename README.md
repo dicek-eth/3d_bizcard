@@ -14,6 +14,8 @@ https://3dbizcard.vercel.app
 - Browser camera view
 - QR tracking with corner-based overlay placement
 - Three.js character rendered over the camera feed
+- Character anchor floats above the QR top edge
+- Approximate QR-plane pitch/yaw from QR corner perspective
 - Pinch zoom from 0.5x to 3.0x
 - Character admin screen at `/admin`
 - Custom `.glb` or self-contained `.gltf` model storage in the browser

@@ -10,8 +10,11 @@ type Point = {
 
 type TrackState = {
   center: Point;
+  anchor: Point;
   size: number;
   rotation: number;
+  pitch: number;
+  yaw: number;
   code: string;
 };
 
@@ -149,9 +152,12 @@ const root = new THREE.Group();
 root.visible = false;
 scene.add(root);
 
+const characterPivot = new THREE.Group();
+root.add(characterPivot);
+
 let character = createDefaultCharacter();
 setActiveModelName('default');
-root.add(character);
+characterPivot.add(character);
 
 const ambient = new THREE.AmbientLight(0xffffff, 1.7);
 scene.add(ambient);
@@ -422,11 +428,26 @@ function toTrackState(code: QRCode, sourceSize: { width: number; height: number 
   const rightHeight = distance(points[1], points[2]);
   const size = (topWidth + bottomWidth + leftHeight + rightHeight) / 4;
   const rotation = Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
+  const topCenter = midpoint(points[0], points[1]);
+  const bottomCenter = midpoint(points[3], points[2]);
+  const markerUp = normalizePoint({
+    x: topCenter.x - bottomCenter.x,
+    y: topCenter.y - bottomCenter.y,
+  });
+  const anchor = {
+    x: topCenter.x + markerUp.x * size * 0.44,
+    y: topCenter.y + markerUp.y * size * 0.44,
+  };
+  const pitch = clamp(((topWidth - bottomWidth) / Math.max(1, topWidth + bottomWidth)) * 2.2, -1.05, 1.05);
+  const yaw = clamp(((leftHeight - rightHeight) / Math.max(1, leftHeight + rightHeight)) * 2.2, -1.05, 1.05);
 
   return {
     center,
+    anchor,
     size,
     rotation,
+    pitch,
+    yaw,
     code: code.data,
   };
 }
@@ -460,14 +481,14 @@ function renderLoop(time = 0): void {
 function placeCharacter(track: TrackState, time: number): void {
   void time;
   const stageRect = feedLayer.getBoundingClientRect();
-  const stageX = track.center.x - stageRect.width / 2;
-  const stageY = stageRect.height / 2 - track.center.y;
+  const stageX = track.anchor.x - stageRect.width / 2;
+  const stageY = stageRect.height / 2 - track.anchor.y;
   const baseScale = Math.max(48, track.size * 0.24) * userScale;
-  const lift = track.size * 0.3;
 
-  root.position.set(stageX, stageY + lift, 0);
+  root.position.set(stageX, stageY, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, -track.rotation);
+  characterPivot.rotation.set(track.pitch, track.yaw, 0, 'YXZ');
 }
 
 function setupAdmin(): void {
@@ -588,10 +609,10 @@ function normalizeModel(model: THREE.Group): void {
 }
 
 function replaceCharacter(nextCharacter: THREE.Group): void {
-  root.remove(character);
+  characterPivot.remove(character);
   disposeObject(character);
   character = nextCharacter;
-  root.add(character);
+  characterPivot.add(character);
 }
 
 function setActiveModelName(name: string): void {
@@ -722,8 +743,14 @@ function smoothTrack(previous: TrackState, next: TrackState): TrackState {
       x: lerp(previous.center.x, next.center.x, factor),
       y: lerp(previous.center.y, next.center.y, factor),
     },
+    anchor: {
+      x: lerp(previous.anchor.x, next.anchor.x, factor),
+      y: lerp(previous.anchor.y, next.anchor.y, factor),
+    },
     size: lerp(previous.size, next.size, factor),
     rotation: lerpAngle(previous.rotation, next.rotation, factor),
+    pitch: lerp(previous.pitch, next.pitch, factor),
+    yaw: lerp(previous.yaw, next.yaw, factor),
     code: next.code,
   };
 }
@@ -732,6 +759,26 @@ function averagePoint(points: Point[]): Point {
   return {
     x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
     y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  };
+}
+
+function midpoint(a: Point, b: Point): Point {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  };
+}
+
+function normalizePoint(point: Point): Point {
+  const length = Math.hypot(point.x, point.y);
+
+  if (length <= 0.0001) {
+    return { x: 0, y: -1 };
+  }
+
+  return {
+    x: point.x / length,
+    y: point.y / length,
   };
 }
 
