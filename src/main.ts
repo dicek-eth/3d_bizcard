@@ -128,6 +128,7 @@ let lastDetectedAt = 0;
 let consecutiveMisses = 0;
 let userScale = 1;
 let userRotation = 0;
+let userTilt = 0;
 let animationFrame = 0;
 let detectionFrame = 0;
 
@@ -478,8 +479,9 @@ function placeCharacter(track: TrackState, time: number): void {
   root.position.set(stageX, stageY, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, 0);
-  characterPivot.rotation.set(0, userRotation, 0);
+  characterPivot.rotation.set(userTilt, userRotation, 0);
   document.documentElement.dataset.characterRotation = userRotation.toFixed(4);
+  document.documentElement.dataset.characterTilt = userTilt.toFixed(4);
 }
 
 function setupAdmin(): void {
@@ -631,14 +633,18 @@ function disposeObject(object: THREE.Object3D): void {
 
 function setupGestures(): void {
   const pointers = new Map<number, PointerEvent>();
+  const dragRotationSensitivity = 0.01;
+  const maxTilt = THREE.MathUtils.degToRad(55);
   let pinchStartDistance = 0;
-  let twistStartAngle = 0;
+  let dragStartCenter: Point | null = null;
   let pinchStartScale = userScale;
-  let twistStartRotation = userRotation;
+  let dragStartRotation = userRotation;
+  let dragStartTilt = userTilt;
   let touchStartDistance = 0;
-  let touchStartAngle = 0;
+  let touchStartCenter: Point | null = null;
   let touchStartScale = userScale;
   let touchStartRotation = userRotation;
+  let touchStartTilt = userTilt;
 
   sceneCanvas.addEventListener('pointerdown', (event) => {
     try {
@@ -651,9 +657,10 @@ function setupGestures(): void {
     if (pointers.size === 2) {
       const activePointers = [...pointers.values()];
       pinchStartDistance = pointerDistance(activePointers);
-      twistStartAngle = pointerAngle(activePointers);
+      dragStartCenter = pointerCenter(activePointers);
       pinchStartScale = userScale;
-      twistStartRotation = userRotation;
+      dragStartRotation = userRotation;
+      dragStartTilt = userTilt;
     }
   });
 
@@ -667,9 +674,12 @@ function setupGestures(): void {
     if (pointers.size === 2 && pinchStartDistance > 0) {
       const activePointers = [...pointers.values()];
       const currentDistance = pointerDistance(activePointers);
-      const currentAngle = pointerAngle(activePointers);
+      const currentCenter = pointerCenter(activePointers);
+      const deltaX = dragStartCenter ? currentCenter.x - dragStartCenter.x : 0;
+      const deltaY = dragStartCenter ? currentCenter.y - dragStartCenter.y : 0;
       userScale = clamp(pinchStartScale * (currentDistance / pinchStartDistance), 0.5, 3);
-      userRotation = normalizeAngle(twistStartRotation + shortestAngleDelta(currentAngle, twistStartAngle));
+      userRotation = normalizeAngle(dragStartRotation + deltaX * dragRotationSensitivity);
+      userTilt = clamp(dragStartTilt + deltaY * dragRotationSensitivity, -maxTilt, maxTilt);
       hintText.textContent = `Scale ${userScale.toFixed(2)}x / Rotate ${Math.round(THREE.MathUtils.radToDeg(userRotation))}deg`;
     }
   });
@@ -678,13 +688,14 @@ function setupGestures(): void {
     pointers.delete(event.pointerId);
     if (pointers.size < 2) {
       pinchStartDistance = 0;
-      twistStartAngle = 0;
+      dragStartCenter = null;
     } else {
       const activePointers = [...pointers.values()];
       pinchStartDistance = pointerDistance(activePointers);
-      twistStartAngle = pointerAngle(activePointers);
+      dragStartCenter = pointerCenter(activePointers);
       pinchStartScale = userScale;
-      twistStartRotation = userRotation;
+      dragStartRotation = userRotation;
+      dragStartTilt = userTilt;
     }
   };
 
@@ -698,9 +709,10 @@ function setupGestures(): void {
         event.preventDefault();
         const touches = [...event.touches];
         touchStartDistance = touchDistance(touches);
-        touchStartAngle = touchAngle(touches);
+        touchStartCenter = touchCenter(touches);
         touchStartScale = userScale;
         touchStartRotation = userRotation;
+        touchStartTilt = userTilt;
       }
     },
     { passive: false },
@@ -716,9 +728,12 @@ function setupGestures(): void {
       event.preventDefault();
       const touches = [...event.touches];
       const currentDistance = touchDistance(touches);
-      const currentAngle = touchAngle(touches);
+      const currentCenter = touchCenter(touches);
+      const deltaX = touchStartCenter ? currentCenter.x - touchStartCenter.x : 0;
+      const deltaY = touchStartCenter ? currentCenter.y - touchStartCenter.y : 0;
       userScale = clamp(touchStartScale * (currentDistance / touchStartDistance), 0.5, 3);
-      userRotation = normalizeAngle(touchStartRotation + shortestAngleDelta(currentAngle, touchStartAngle));
+      userRotation = normalizeAngle(touchStartRotation + deltaX * dragRotationSensitivity);
+      userTilt = clamp(touchStartTilt + deltaY * dragRotationSensitivity, -maxTilt, maxTilt);
       hintText.textContent = `Scale ${userScale.toFixed(2)}x / Rotate ${Math.round(THREE.MathUtils.radToDeg(userRotation))}deg`;
     },
     { passive: false },
@@ -727,15 +742,16 @@ function setupGestures(): void {
   const releaseTouch = (event: TouchEvent) => {
     if (event.touches.length < 2) {
       touchStartDistance = 0;
-      touchStartAngle = 0;
+      touchStartCenter = null;
       return;
     }
 
     const touches = [...event.touches];
     touchStartDistance = touchDistance(touches);
-    touchStartAngle = touchAngle(touches);
+    touchStartCenter = touchCenter(touches);
     touchStartScale = userScale;
     touchStartRotation = userRotation;
+    touchStartTilt = userTilt;
   };
 
   sceneCanvas.addEventListener('touchend', releaseTouch);
@@ -836,12 +852,15 @@ function pointerDistance(events: PointerEvent[]): number {
   return distance(events[0], events[1]);
 }
 
-function pointerAngle(events: PointerEvent[]): number {
+function pointerCenter(events: PointerEvent[]): Point {
   if (events.length < 2) {
-    return 0;
+    return { x: 0, y: 0 };
   }
 
-  return Math.atan2(events[1].clientY - events[0].clientY, events[1].clientX - events[0].clientX);
+  return {
+    x: (events[0].clientX + events[1].clientX) / 2,
+    y: (events[0].clientY + events[1].clientY) / 2,
+  };
 }
 
 function touchDistance(touches: Touch[]): number {
@@ -852,16 +871,15 @@ function touchDistance(touches: Touch[]): number {
   return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
 }
 
-function touchAngle(touches: Touch[]): number {
+function touchCenter(touches: Touch[]): Point {
   if (touches.length < 2) {
-    return 0;
+    return { x: 0, y: 0 };
   }
 
-  return Math.atan2(touches[1].clientY - touches[0].clientY, touches[1].clientX - touches[0].clientX);
-}
-
-function shortestAngleDelta(current: number, start: number): number {
-  return Math.atan2(Math.sin(current - start), Math.cos(current - start));
+  return {
+    x: (touches[0].clientX + touches[1].clientX) / 2,
+    y: (touches[0].clientY + touches[1].clientY) / 2,
+  };
 }
 
 function normalizeAngle(value: number): number {

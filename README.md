@@ -17,7 +17,7 @@ https://3dbizcard.vercel.app
 - Character anchor floats above the QR top edge
 - Character remains upright relative to the phone screen
 - Pinch zoom from 0.5x to 3.0x
-- Two-finger twist rotation
+- Two-finger drag rotation
 - Character admin screen at `/admin`
 - Custom `.glb` or self-contained `.gltf` model storage in the browser
 - Demo mode using a generated business card back image

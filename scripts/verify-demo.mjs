@@ -105,10 +105,10 @@ for (const viewport of [
 
       dispatch('pointerdown', 1, 540, 420);
       dispatch('pointerdown', 2, 740, 420);
-      dispatch('pointermove', 1, 570, 355);
-      dispatch('pointermove', 2, 710, 485);
-      dispatch('pointerup', 1, 570, 355);
-      dispatch('pointerup', 2, 710, 485);
+      dispatch('pointermove', 1, 620, 390);
+      dispatch('pointermove', 2, 820, 390);
+      dispatch('pointerup', 1, 620, 390);
+      dispatch('pointerup', 2, 820, 390);
     });
     await page.waitForFunction(() => Math.abs(Number(document.documentElement.dataset.characterRotation ?? '0')) > 0.2, null, {
       timeout: 5000,
