@@ -86,6 +86,36 @@ for (const viewport of [
 
   if (viewport.name === 'desktop') {
     await page.evaluate(() => {
+      const canvas = document.querySelector('#sceneCanvas');
+      if (!(canvas instanceof HTMLCanvasElement)) {
+        throw new Error('Scene canvas was not found.');
+      }
+
+      const dispatch = (type, pointerId, clientX, clientY) => {
+        canvas.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            pointerId,
+            pointerType: 'touch',
+            clientX,
+            clientY,
+          }),
+        );
+      };
+
+      dispatch('pointerdown', 1, 540, 420);
+      dispatch('pointerdown', 2, 740, 420);
+      dispatch('pointermove', 1, 570, 355);
+      dispatch('pointermove', 2, 710, 485);
+      dispatch('pointerup', 1, 570, 355);
+      dispatch('pointerup', 2, 710, 485);
+    });
+    await page.waitForFunction(() => Math.abs(Number(document.documentElement.dataset.characterRotation ?? '0')) > 0.2, null, {
+      timeout: 5000,
+    });
+    result.rotationAfterGesture = await page.evaluate(() => document.documentElement.dataset.characterRotation ?? '0');
+
+    await page.evaluate(() => {
       const image = document.querySelector('.camera-feed');
       if (image instanceof HTMLImageElement) {
         image.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%221050%22 height=%22638%22%3E%3Crect width=%221050%22 height=%22638%22 fill=%22white%22/%3E%3C/svg%3E';

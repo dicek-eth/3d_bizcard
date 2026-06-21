@@ -129,6 +129,7 @@ let smoothedTrack: TrackState | null = null;
 let lastDetectedAt = 0;
 let consecutiveMisses = 0;
 let userScale = 1;
+let userRotation = 0;
 let animationFrame = 0;
 let detectionFrame = 0;
 
@@ -488,7 +489,8 @@ function placeCharacter(track: TrackState, time: number): void {
   root.position.set(stageX, stageY, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, -track.rotation);
-  characterPivot.rotation.set(track.pitch, track.yaw, 0, 'YXZ');
+  characterPivot.rotation.set(track.pitch, track.yaw + userRotation, 0, 'YXZ');
+  document.documentElement.dataset.characterRotation = userRotation.toFixed(4);
 }
 
 function setupAdmin(): void {
@@ -641,15 +643,24 @@ function disposeObject(object: THREE.Object3D): void {
 function setupGestures(): void {
   const pointers = new Map<number, PointerEvent>();
   let pinchStartDistance = 0;
+  let twistStartAngle = 0;
   let pinchStartScale = userScale;
+  let twistStartRotation = userRotation;
 
   sceneCanvas.addEventListener('pointerdown', (event) => {
-    sceneCanvas.setPointerCapture(event.pointerId);
+    try {
+      sceneCanvas.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic test events may not be eligible for pointer capture.
+    }
     pointers.set(event.pointerId, event);
 
     if (pointers.size === 2) {
-      pinchStartDistance = pointerDistance([...pointers.values()]);
+      const activePointers = [...pointers.values()];
+      pinchStartDistance = pointerDistance(activePointers);
+      twistStartAngle = pointerAngle(activePointers);
       pinchStartScale = userScale;
+      twistStartRotation = userRotation;
     }
   });
 
@@ -661,9 +672,12 @@ function setupGestures(): void {
     pointers.set(event.pointerId, event);
 
     if (pointers.size === 2 && pinchStartDistance > 0) {
-      const currentDistance = pointerDistance([...pointers.values()]);
+      const activePointers = [...pointers.values()];
+      const currentDistance = pointerDistance(activePointers);
+      const currentAngle = pointerAngle(activePointers);
       userScale = clamp(pinchStartScale * (currentDistance / pinchStartDistance), 0.5, 3);
-      hintText.textContent = `Scale ${userScale.toFixed(2)}x`;
+      userRotation = normalizeAngle(twistStartRotation + shortestAngleDelta(currentAngle, twistStartAngle));
+      hintText.textContent = `Scale ${userScale.toFixed(2)}x / Rotate ${Math.round(THREE.MathUtils.radToDeg(userRotation))}deg`;
     }
   });
 
@@ -671,6 +685,13 @@ function setupGestures(): void {
     pointers.delete(event.pointerId);
     if (pointers.size < 2) {
       pinchStartDistance = 0;
+      twistStartAngle = 0;
+    } else {
+      const activePointers = [...pointers.values()];
+      pinchStartDistance = pointerDistance(activePointers);
+      twistStartAngle = pointerAngle(activePointers);
+      pinchStartScale = userScale;
+      twistStartRotation = userRotation;
     }
   };
 
@@ -792,6 +813,22 @@ function pointerDistance(events: PointerEvent[]): number {
   }
 
   return distance(events[0], events[1]);
+}
+
+function pointerAngle(events: PointerEvent[]): number {
+  if (events.length < 2) {
+    return 0;
+  }
+
+  return Math.atan2(events[1].clientY - events[0].clientY, events[1].clientX - events[0].clientX);
+}
+
+function shortestAngleDelta(current: number, start: number): number {
+  return Math.atan2(Math.sin(current - start), Math.cos(current - start));
+}
+
+function normalizeAngle(value: number): number {
+  return Math.atan2(Math.sin(value), Math.cos(value));
 }
 
 function lerp(a: number, b: number, factor: number): number {
