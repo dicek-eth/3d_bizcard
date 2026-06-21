@@ -128,7 +128,7 @@ for (const viewport of [
       throw new Error(`Expected QR lock to be held through a short detection miss, got ${heldStatus}`);
     }
 
-    await page.waitForTimeout(1400);
+    await page.waitForTimeout(3000);
     const lostStatus = await page.evaluate(() => document.querySelector('#statusText')?.textContent);
     if (lostStatus !== 'Searching for QR') {
       throw new Error(`Expected QR lock to release after the hold window, got ${lostStatus}`);

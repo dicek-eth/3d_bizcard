@@ -13,8 +13,6 @@ type TrackState = {
   anchor: Point;
   size: number;
   rotation: number;
-  pitch: number;
-  yaw: number;
   code: string;
 };
 
@@ -115,7 +113,7 @@ const resetModelButton = document.querySelector<HTMLButtonElement>('#resetModelB
 const demoMode = params.get('demo') === '1';
 const verifyMode = params.get('verify') === '1';
 const expectedCardId = params.get('card') ?? 'default';
-const trackHoldMs = 900;
+const trackHoldMs = 2500;
 const dbName = '3d-bizcard';
 const dbVersion = 1;
 const modelStoreName = 'settings';
@@ -395,7 +393,7 @@ function detectionLoop(): void {
     } else {
       consecutiveMisses += 1;
       const elapsedSinceDetection = performance.now() - lastDetectedAt;
-      const shouldHoldTrack = latestTrack && (elapsedSinceDetection <= trackHoldMs || consecutiveMisses <= 3);
+      const shouldHoldTrack = latestTrack && elapsedSinceDetection <= trackHoldMs;
 
       if (shouldHoldTrack) {
         updateStatusFromTrack(latestTrack);
@@ -429,26 +427,17 @@ function toTrackState(code: QRCode, sourceSize: { width: number; height: number 
   const rightHeight = distance(points[1], points[2]);
   const size = (topWidth + bottomWidth + leftHeight + rightHeight) / 4;
   const rotation = Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x);
-  const topCenter = midpoint(points[0], points[1]);
-  const bottomCenter = midpoint(points[3], points[2]);
-  const markerUp = normalizePoint({
-    x: topCenter.x - bottomCenter.x,
-    y: topCenter.y - bottomCenter.y,
-  });
+  const minY = Math.min(...points.map((point) => point.y));
   const anchor = {
-    x: topCenter.x + markerUp.x * size * 0.44,
-    y: topCenter.y + markerUp.y * size * 0.44,
+    x: center.x,
+    y: minY - size * 0.45,
   };
-  const pitch = clamp(((topWidth - bottomWidth) / Math.max(1, topWidth + bottomWidth)) * 2.2, -1.05, 1.05);
-  const yaw = clamp(((leftHeight - rightHeight) / Math.max(1, leftHeight + rightHeight)) * 2.2, -1.05, 1.05);
 
   return {
     center,
     anchor,
     size,
     rotation,
-    pitch,
-    yaw,
     code: code.data,
   };
 }
@@ -488,8 +477,8 @@ function placeCharacter(track: TrackState, time: number): void {
 
   root.position.set(stageX, stageY, 0);
   root.scale.setScalar(baseScale);
-  root.rotation.set(0, 0, -track.rotation);
-  characterPivot.rotation.set(track.pitch, track.yaw + userRotation, 0, 'YXZ');
+  root.rotation.set(0, 0, 0);
+  characterPivot.rotation.set(0, userRotation, 0);
   document.documentElement.dataset.characterRotation = userRotation.toFixed(4);
 }
 
@@ -646,6 +635,10 @@ function setupGestures(): void {
   let twistStartAngle = 0;
   let pinchStartScale = userScale;
   let twistStartRotation = userRotation;
+  let touchStartDistance = 0;
+  let touchStartAngle = 0;
+  let touchStartScale = userScale;
+  let touchStartRotation = userRotation;
 
   sceneCanvas.addEventListener('pointerdown', (event) => {
     try {
@@ -697,6 +690,56 @@ function setupGestures(): void {
 
   sceneCanvas.addEventListener('pointerup', releasePointer);
   sceneCanvas.addEventListener('pointercancel', releasePointer);
+
+  sceneCanvas.addEventListener(
+    'touchstart',
+    (event) => {
+      if (event.touches.length === 2) {
+        event.preventDefault();
+        const touches = [...event.touches];
+        touchStartDistance = touchDistance(touches);
+        touchStartAngle = touchAngle(touches);
+        touchStartScale = userScale;
+        touchStartRotation = userRotation;
+      }
+    },
+    { passive: false },
+  );
+
+  sceneCanvas.addEventListener(
+    'touchmove',
+    (event) => {
+      if (event.touches.length !== 2 || touchStartDistance <= 0) {
+        return;
+      }
+
+      event.preventDefault();
+      const touches = [...event.touches];
+      const currentDistance = touchDistance(touches);
+      const currentAngle = touchAngle(touches);
+      userScale = clamp(touchStartScale * (currentDistance / touchStartDistance), 0.5, 3);
+      userRotation = normalizeAngle(touchStartRotation + shortestAngleDelta(currentAngle, touchStartAngle));
+      hintText.textContent = `Scale ${userScale.toFixed(2)}x / Rotate ${Math.round(THREE.MathUtils.radToDeg(userRotation))}deg`;
+    },
+    { passive: false },
+  );
+
+  const releaseTouch = (event: TouchEvent) => {
+    if (event.touches.length < 2) {
+      touchStartDistance = 0;
+      touchStartAngle = 0;
+      return;
+    }
+
+    const touches = [...event.touches];
+    touchStartDistance = touchDistance(touches);
+    touchStartAngle = touchAngle(touches);
+    touchStartScale = userScale;
+    touchStartRotation = userRotation;
+  };
+
+  sceneCanvas.addEventListener('touchend', releaseTouch);
+  sceneCanvas.addEventListener('touchcancel', releaseTouch);
 }
 
 function getSourceSize(element: MediaSourceElement): { width: number; height: number } {
@@ -770,8 +813,6 @@ function smoothTrack(previous: TrackState, next: TrackState): TrackState {
     },
     size: lerp(previous.size, next.size, factor),
     rotation: lerpAngle(previous.rotation, next.rotation, factor),
-    pitch: lerp(previous.pitch, next.pitch, factor),
-    yaw: lerp(previous.yaw, next.yaw, factor),
     code: next.code,
   };
 }
@@ -780,26 +821,6 @@ function averagePoint(points: Point[]): Point {
   return {
     x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
     y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
-  };
-}
-
-function midpoint(a: Point, b: Point): Point {
-  return {
-    x: (a.x + b.x) / 2,
-    y: (a.y + b.y) / 2,
-  };
-}
-
-function normalizePoint(point: Point): Point {
-  const length = Math.hypot(point.x, point.y);
-
-  if (length <= 0.0001) {
-    return { x: 0, y: -1 };
-  }
-
-  return {
-    x: point.x / length,
-    y: point.y / length,
   };
 }
 
@@ -821,6 +842,22 @@ function pointerAngle(events: PointerEvent[]): number {
   }
 
   return Math.atan2(events[1].clientY - events[0].clientY, events[1].clientX - events[0].clientX);
+}
+
+function touchDistance(touches: Touch[]): number {
+  if (touches.length < 2) {
+    return 0;
+  }
+
+  return Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+}
+
+function touchAngle(touches: Touch[]): number {
+  if (touches.length < 2) {
+    return 0;
+  }
+
+  return Math.atan2(touches[1].clientY - touches[0].clientY, touches[1].clientX - touches[0].clientX);
 }
 
 function shortestAngleDelta(current: number, start: number): number {
