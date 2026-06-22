@@ -126,6 +126,8 @@ const activeModelKey = 'active-model-dice-v1';
 const autoRotationDurationMs = 10000;
 const modelSyncChannelName = '3d-bizcard-model-sync';
 const modelUpdatedStorageKey = '3d-bizcard-model-updated';
+const cameraDepth = 2000;
+const cameraFarDepth = 5000;
 
 let mediaElement: MediaSourceElement | null = null;
 let cameraStream: MediaStream | null = null;
@@ -156,8 +158,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
-camera.position.z = 10;
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, cameraFarDepth);
+camera.position.z = cameraDepth;
 
 const root = new THREE.Group();
 root.visible = false;
@@ -496,6 +498,10 @@ function placeCharacter(track: TrackState, time: number): void {
   characterPivot.rotation.set(0, autoRotation, 0);
   document.documentElement.dataset.characterScale = displayedScale.toFixed(4);
   document.documentElement.dataset.characterRotation = autoRotation.toFixed(4);
+
+  if (verifyMode) {
+    updateDepthDiagnostics();
+  }
 }
 
 function setupAdmin(): void {
@@ -735,6 +741,21 @@ function findFirstMeshParent(object: THREE.Object3D): THREE.Object3D | null {
   });
 
   return parent;
+}
+
+function updateDepthDiagnostics(): void {
+  root.updateWorldMatrix(true, true);
+  const box = new THREE.Box3().setFromObject(characterPivot);
+  const nearPlaneZ = camera.position.z - camera.near;
+  const farPlaneZ = camera.position.z - camera.far;
+  const clippedNear = box.max.z > nearPlaneZ;
+  const clippedFar = box.min.z < farPlaneZ;
+
+  document.documentElement.dataset.characterWorldMinZ = box.min.z.toFixed(2);
+  document.documentElement.dataset.characterWorldMaxZ = box.max.z.toFixed(2);
+  document.documentElement.dataset.cameraNearPlaneZ = nearPlaneZ.toFixed(2);
+  document.documentElement.dataset.cameraFarPlaneZ = farPlaneZ.toFixed(2);
+  document.documentElement.dataset.characterDepthClipped = String(clippedNear || clippedFar);
 }
 
 function replaceCharacter(nextCharacter: THREE.Group): void {

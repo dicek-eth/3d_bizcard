@@ -73,6 +73,11 @@ for (const viewport of [
       canvasHeight: canvas.height,
       nonTransparent,
       bright,
+      characterWorldMinZ: document.documentElement.dataset.characterWorldMinZ,
+      characterWorldMaxZ: document.documentElement.dataset.characterWorldMaxZ,
+      cameraNearPlaneZ: document.documentElement.dataset.cameraNearPlaneZ,
+      cameraFarPlaneZ: document.documentElement.dataset.cameraFarPlaneZ,
+      characterDepthClipped: document.documentElement.dataset.characterDepthClipped,
     };
   });
 
@@ -82,6 +87,10 @@ for (const viewport of [
 
   if (metrics.nonTransparent < 1000 || metrics.bright < 500) {
     throw new Error(`${viewport.name} canvas did not contain enough rendered pixels: ${JSON.stringify(metrics)}`);
+  }
+
+  if (metrics.characterDepthClipped !== 'false') {
+    throw new Error(`${viewport.name} character depth is clipped: ${JSON.stringify(metrics)}`);
   }
 
   if (viewport.name === 'desktop') {
