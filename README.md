@@ -68,6 +68,15 @@ File > Export > glTF 2.0 > Format: GLB Binary
 
 Pack textures into the GLB and keep the file under 5MB when possible.
 
+For higher fidelity exports:
+
+- Apply visible modifiers before export, or enable Apply Modifiers in the glTF exporter.
+- Use real mesh bevels/subdivision for rounded pips and dice edges; Blender viewport-only smoothing is not enough.
+- Set object shade smoothing and add weighted normals where needed.
+- Use material base colors for simple colors, and pack image textures into the GLB for detailed surface work.
+- Export selected objects only, with the dice centered near the origin.
+- Check the exported `.glb` in an external viewer before uploading.
+
 ## Test Card
 
 The generated back-side image is:
