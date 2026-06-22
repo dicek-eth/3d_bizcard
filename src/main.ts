@@ -602,6 +602,7 @@ async function loadDefaultCharacterModel(): Promise<THREE.Group> {
 
   const blob = await response.blob();
   const model = await parseModelBlob(blob);
+  addDiceSolidCore(model);
   model.userData.modelName = defaultModelName;
   return model;
 }
@@ -672,6 +673,68 @@ function prepareCharacterForAr(object: THREE.Object3D): void {
       material.needsUpdate = true;
     }
   });
+}
+
+function addDiceSolidCore(model: THREE.Group): void {
+  const diceNode = findFirstMeshParent(model) ?? model;
+  const box = new THREE.Box3();
+
+  diceNode.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+
+    if (!mesh.isMesh || !mesh.geometry) {
+      return;
+    }
+
+    if (!mesh.geometry.boundingBox) {
+      mesh.geometry.computeBoundingBox();
+    }
+
+    const geometryBox = mesh.geometry.boundingBox?.clone();
+    if (geometryBox) {
+      geometryBox.applyMatrix4(mesh.matrix);
+      box.union(geometryBox);
+    }
+  });
+
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  if (!Number.isFinite(size.x) || size.x <= 0 || !Number.isFinite(size.y) || size.y <= 0 || !Number.isFinite(size.z) || size.z <= 0) {
+    return;
+  }
+
+  const core = new THREE.Mesh(
+    new THREE.BoxGeometry(size.x * 0.985, size.y * 0.985, size.z * 0.985),
+    new THREE.MeshStandardMaterial({
+      color: 0xf2f7f8,
+      roughness: 0.55,
+      metalness: 0,
+    }),
+  );
+
+  core.name = 'dice-solid-core';
+  core.position.copy(center);
+  core.renderOrder = 9;
+  core.frustumCulled = false;
+  core.material.depthTest = true;
+  core.material.depthWrite = true;
+  core.material.transparent = false;
+  core.material.opacity = 1;
+  diceNode.add(core);
+}
+
+function findFirstMeshParent(object: THREE.Object3D): THREE.Object3D | null {
+  let parent: THREE.Object3D | null = null;
+
+  object.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (!parent && mesh.isMesh) {
+      parent = child.parent;
+    }
+  });
+
+  return parent;
 }
 
 function replaceCharacter(nextCharacter: THREE.Group): void {
