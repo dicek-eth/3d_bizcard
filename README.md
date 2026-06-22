@@ -14,6 +14,7 @@ https://3dbizcard.vercel.app
 - Browser camera view
 - QR tracking with corner-based overlay placement
 - Three.js character rendered over the camera feed
+- Bundled default character model at `public/models/dice-character.glb`
 - Character anchor floats above the QR top edge
 - Character remains upright relative to the phone screen
 - Pinch zoom from 0.5x to 3.0x
@@ -55,7 +56,7 @@ Open:
 https://3dbizcard.vercel.app/admin
 ```
 
-Upload a `.glb` file to replace the AR character on that device/browser. The selected model is saved in IndexedDB and loaded by the AR screen on the same origin. Open AR tabs in the same browser are notified and reload the selected model automatically.
+Upload a `.glb` file to replace the AR character on that device/browser. The selected model is saved in IndexedDB and loaded by the AR screen on the same origin. Open AR tabs in the same browser are notified and reload the selected model automatically. Resetting returns to the bundled `dice-character.glb` model.
 
 This is local browser storage, not a production-wide server upload. A model uploaded on a desktop browser will not appear on a different phone/browser until server-side storage is added.
 

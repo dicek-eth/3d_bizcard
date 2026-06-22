@@ -117,10 +117,12 @@ const demoMode = params.get('demo') === '1';
 const verifyMode = params.get('verify') === '1';
 const expectedCardId = params.get('card') ?? 'default';
 const trackHoldMs = 2500;
+const defaultModelUrl = '/models/dice-character.glb';
+const defaultModelName = 'dice-character.glb';
 const dbName = '3d-bizcard';
 const dbVersion = 1;
 const modelStoreName = 'settings';
-const activeModelKey = 'active-model';
+const activeModelKey = 'active-model-dice-v1';
 const autoRotationDurationMs = 10000;
 const modelSyncChannelName = '3d-bizcard-model-sync';
 const modelUpdatedStorageKey = '3d-bizcard-model-updated';
@@ -550,7 +552,11 @@ async function saveSelectedModel(file: File): Promise<void> {
 
 async function resetStoredModel(): Promise<void> {
   await deleteStoredModel();
-  replaceCharacter(createDefaultCharacter());
+  try {
+    replaceCharacter(await loadDefaultCharacterModel());
+  } catch {
+    replaceCharacter(createDefaultCharacter());
+  }
   setActiveModelName('default');
   announceModelChange('default');
   modelStatus.textContent = '現在のモデル: デフォルト';
@@ -560,6 +566,12 @@ async function loadStoredCharacter(): Promise<void> {
   const storedModel = await readStoredModel();
 
   if (!storedModel) {
+    try {
+      replaceCharacter(await loadDefaultCharacterModel());
+    } catch {
+      replaceCharacter(createDefaultCharacter());
+    }
+    setActiveModelName('default');
     modelStatus.textContent = '現在のモデル: デフォルト';
     return;
   }
@@ -579,6 +591,19 @@ function refreshModelStatus(): void {
   void readStoredModel().then((storedModel) => {
     modelStatus.textContent = storedModel ? `現在のモデル: ${storedModel.name}` : '現在のモデル: デフォルト';
   });
+}
+
+async function loadDefaultCharacterModel(): Promise<THREE.Group> {
+  const response = await fetch(defaultModelUrl, { cache: 'force-cache' });
+
+  if (!response.ok) {
+    throw new Error(`Default model could not be loaded: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const model = await parseModelBlob(blob);
+  model.userData.modelName = defaultModelName;
+  return model;
 }
 
 async function parseModelBlob(blob: Blob): Promise<THREE.Group> {
