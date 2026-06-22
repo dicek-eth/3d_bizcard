@@ -1,5 +1,6 @@
 import jsQR, { type QRCode } from 'jsqr';
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import './styles.css';
 
@@ -126,7 +127,8 @@ const activeModelKey = 'active-model-dice-v1';
 const autoRotationDurationMs = 10000;
 const modelSyncChannelName = '3d-bizcard-model-sync';
 const modelUpdatedStorageKey = '3d-bizcard-model-updated';
-const cameraDepth = 2000;
+const cameraFov = 42;
+const cameraDepth = 1000;
 const cameraFarDepth = 5000;
 
 let mediaElement: MediaSourceElement | null = null;
@@ -154,12 +156,17 @@ const renderer = new THREE.WebGLRenderer({
   preserveDrawingBuffer: verifyMode,
 });
 renderer.setClearColor(0x000000, 0);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 3));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
 
 const scene = new THREE.Scene();
-const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, cameraFarDepth);
+const camera = new THREE.PerspectiveCamera(cameraFov, 1, 0.1, cameraFarDepth);
 camera.position.z = cameraDepth;
+
+const environmentGenerator = new THREE.PMREMGenerator(renderer);
+scene.environment = environmentGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
 
 const root = new THREE.Group();
 root.visible = false;
@@ -172,14 +179,14 @@ let character = createDefaultCharacter();
 setActiveModelName('default');
 characterPivot.add(character);
 
-const ambient = new THREE.AmbientLight(0xffffff, 1.7);
+const ambient = new THREE.AmbientLight(0xffffff, 0.65);
 scene.add(ambient);
 
-const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
-keyLight.position.set(1, 2, 3);
+const keyLight = new THREE.DirectionalLight(0xffffff, 1.45);
+keyLight.position.set(2, 3, 4);
 scene.add(keyLight);
 
-const rimLight = new THREE.DirectionalLight(0x5fd9ff, 1.4);
+const rimLight = new THREE.DirectionalLight(0x9edcff, 0.45);
 rimLight.position.set(-2, 1, 2);
 scene.add(rimLight);
 
@@ -487,12 +494,13 @@ function renderLoop(time = 0): void {
 
 function placeCharacter(track: TrackState, time: number): void {
   const stageRect = feedLayer.getBoundingClientRect();
+  const worldPerPixel = getWorldPerPixel(stageRect.height);
   const stageX = track.anchor.x - stageRect.width / 2;
   const stageY = stageRect.height / 2 - track.anchor.y;
-  const baseScale = Math.max(48, track.size * 0.24) * displayedScale;
+  const baseScale = Math.max(64, track.size * 0.36) * displayedScale * worldPerPixel;
   const autoRotation = getAutoRotation(time);
 
-  root.position.set(stageX, stageY, 0);
+  root.position.set(stageX * worldPerPixel, stageY * worldPerPixel, 0);
   root.scale.setScalar(baseScale);
   root.rotation.set(0, 0, 0);
   characterPivot.rotation.set(0, autoRotation, 0);
@@ -656,26 +664,9 @@ function prepareCharacterForAr(object: THREE.Object3D): void {
     }
 
     mesh.frustumCulled = false;
-    mesh.renderOrder = 10;
 
     if (mesh.geometry && !mesh.geometry.attributes.normal) {
       mesh.geometry.computeVertexNormals();
-    }
-
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const material of materials) {
-      if (!material) {
-        continue;
-      }
-
-      material.transparent = false;
-      material.opacity = 1;
-      material.depthTest = true;
-      material.depthWrite = true;
-      material.side = THREE.DoubleSide;
-      material.blending = THREE.NormalBlending;
-      material.colorWrite = true;
-      material.needsUpdate = true;
     }
   });
 }
@@ -892,12 +883,14 @@ function resizeScene(): void {
 
   if (sceneCanvas.width !== Math.round(width * renderer.getPixelRatio()) || sceneCanvas.height !== Math.round(height * renderer.getPixelRatio())) {
     renderer.setSize(width, height, false);
-    camera.left = -width / 2;
-    camera.right = width / 2;
-    camera.top = height / 2;
-    camera.bottom = -height / 2;
+    camera.aspect = width / height;
     camera.updateProjectionMatrix();
   }
+}
+
+function getWorldPerPixel(stageHeight: number): number {
+  const visibleHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.position.z;
+  return visibleHeight / Math.max(1, stageHeight);
 }
 
 function updateStatusFromTrack(track: TrackState | null): void {
