@@ -152,15 +152,26 @@ for (const viewport of [
   await page.close();
 }
 
-const adminPage = await browser.newPage({ viewport: { width: 1024, height: 760 } });
+const syncContext = await browser.newContext({ viewport: { width: 1024, height: 760 } });
+const adminPage = await syncContext.newPage();
+const arSyncPage = await syncContext.newPage();
+await arSyncPage.goto(`${baseOrigin}/?demo=1&verify=1&card=default`, { waitUntil: 'networkidle' });
+await arSyncPage.waitForFunction(() => document.documentElement.dataset.activeModel === 'default', null, {
+  timeout: 10000,
+});
 await adminPage.goto(`${baseOrigin}/admin`, { waitUntil: 'networkidle' });
 await adminPage.waitForSelector('text=キャラクター管理', { timeout: 10000 });
+await adminPage.waitForSelector('text=この端末・このブラウザ内', { timeout: 10000 });
 const adminStatus = await adminPage.locator('#modelStatus').textContent();
 await adminPage.locator('#modelInput').setInputFiles(sampleModelPath);
 await adminPage.waitForFunction(() => document.querySelector('#modelStatus')?.textContent === '現在のモデル: sample-character.gltf', null, {
   timeout: 10000,
 });
 const uploadedStatus = await adminPage.locator('#modelStatus').textContent();
+await arSyncPage.waitForFunction(() => document.documentElement.dataset.activeModel === 'sample-character.gltf', null, {
+  timeout: 10000,
+});
+const syncedArModelName = await arSyncPage.evaluate(() => document.documentElement.dataset.activeModel ?? '');
 await adminPage.goto(`${baseOrigin}/?demo=1&verify=1&card=default`, { waitUntil: 'networkidle' });
 await adminPage.waitForFunction(() => document.documentElement.dataset.activeModel === 'sample-character.gltf', null, {
   timeout: 10000,
@@ -186,9 +197,12 @@ results.push({
   status: adminStatus?.trim() ?? '',
   uploadedStatus: uploadedStatus?.trim() ?? '',
   arModelName,
+  syncedArModelName,
   resetStatus: resetStatus?.trim() ?? '',
 });
 await adminPage.close();
+await arSyncPage.close();
+await syncContext.close();
 
 await browser.close();
 await fs.writeFile(path.join(outputDir, 'demo-results.json'), `${JSON.stringify(results, null, 2)}\n`);

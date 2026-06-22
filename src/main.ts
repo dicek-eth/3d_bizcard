@@ -72,6 +72,9 @@ app.innerHTML = `
       <section class="admin-panel">
         <h2>表示キャラクター</h2>
         <p id="modelStatus" class="admin-status">現在のモデルを確認しています...</p>
+        <p class="admin-note">
+          現在のアップロードはこの端末・このブラウザ内に保存されます。別のスマホや別ブラウザには共有されません。
+        </p>
         <label class="file-picker">
           <span>3Dファイルを選択</span>
           <input id="modelInput" type="file" accept=".glb,.gltf,.blend,model/gltf-binary,model/gltf+json" />
@@ -119,6 +122,8 @@ const dbVersion = 1;
 const modelStoreName = 'settings';
 const activeModelKey = 'active-model';
 const autoRotationDurationMs = 10000;
+const modelSyncChannelName = '3d-bizcard-model-sync';
+const modelUpdatedStorageKey = '3d-bizcard-model-updated';
 
 let mediaElement: MediaSourceElement | null = null;
 let cameraStream: MediaStream | null = null;
@@ -135,6 +140,7 @@ let lastRenderAt = 0;
 
 const detectorCanvas = document.createElement('canvas');
 const detectorContext = createDetectorContext(detectorCanvas);
+const modelSyncChannel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(modelSyncChannelName);
 
 const renderer = new THREE.WebGLRenderer({
   canvas: sceneCanvas,
@@ -175,6 +181,7 @@ scene.add(rimLight);
 
 setupGestures();
 setupAdmin();
+setupModelSync();
 resizeScene();
 void loadStoredCharacter();
 window.addEventListener('resize', resizeScene);
@@ -531,6 +538,7 @@ async function saveSelectedModel(file: File): Promise<void> {
     });
     replaceCharacter(model);
     setActiveModelName(file.name);
+    announceModelChange(file.name);
     modelStatus.textContent = `現在のモデル: ${file.name}`;
     modelInput.value = '';
   } catch (error) {
@@ -544,6 +552,7 @@ async function resetStoredModel(): Promise<void> {
   await deleteStoredModel();
   replaceCharacter(createDefaultCharacter());
   setActiveModelName('default');
+  announceModelChange('default');
   modelStatus.textContent = '現在のモデル: デフォルト';
 }
 
@@ -649,6 +658,31 @@ function replaceCharacter(nextCharacter: THREE.Group): void {
 
 function setActiveModelName(name: string): void {
   document.documentElement.dataset.activeModel = name;
+}
+
+function setupModelSync(): void {
+  modelSyncChannel?.addEventListener('message', (event) => {
+    if (event.data?.type === 'model-updated') {
+      void loadStoredCharacter();
+    }
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (event.key === modelUpdatedStorageKey) {
+      void loadStoredCharacter();
+    }
+  });
+}
+
+function announceModelChange(name: string): void {
+  const message = { type: 'model-updated', name, updatedAt: Date.now() };
+  modelSyncChannel?.postMessage(message);
+
+  try {
+    localStorage.setItem(modelUpdatedStorageKey, JSON.stringify(message));
+  } catch {
+    // Private browsing can block localStorage; BroadcastChannel still covers modern browsers.
+  }
 }
 
 function disposeObject(object: THREE.Object3D): void {

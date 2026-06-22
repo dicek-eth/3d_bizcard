@@ -55,7 +55,9 @@ Open:
 https://3dbizcard.vercel.app/admin
 ```
 
-Upload a `.glb` file to replace the AR character on that device/browser. The selected model is saved in IndexedDB and loaded by the AR screen on the same origin.
+Upload a `.glb` file to replace the AR character on that device/browser. The selected model is saved in IndexedDB and loaded by the AR screen on the same origin. Open AR tabs in the same browser are notified and reload the selected model automatically.
+
+This is local browser storage, not a production-wide server upload. A model uploaded on a desktop browser will not appear on a different phone/browser until server-side storage is added.
 
 Blender source files (`.blend`) are not directly renderable in browser WebGL. Export from Blender with:
 

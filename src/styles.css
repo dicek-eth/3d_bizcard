@@ -283,6 +283,13 @@ button {
   font-weight: 700;
 }
 
+.admin-note {
+  margin: -6px 0 16px;
+  padding: 10px 12px;
+  border-left: 3px solid #1f8a70;
+  background: #eef8f5;
+}
+
 .file-picker {
   display: flex;
   align-items: center;
